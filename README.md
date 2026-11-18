@@ -28,18 +28,20 @@ own hour-1 viewers — is borrowed from the comparables:
   release day was contaminated by an earlier early-access peak, or that is
   free-to-play / live-service counts for less.
 - A comparable whose hour-1 audience is far from the target's also counts
-  for less, through an exponential kernel on the log scale gap.
+  for less, through a Gaussian kernel on the log scale gap.
 - Each hour's forecast is the weighted empirical quantiles of the
   comparables' log ratios at that hour, mapped back through the case's
-  hour-1 print, with one global spread factor around the median.
+  hour-1 print, with one global spread factor around the median; the
+  log-quantile curve is then lightly smoothed across neighbouring hours.
 
-The weights and the spread factor were chosen by leave-one-out
-cross-validation over the comparable launches themselves — each comparable
-in turn forecast from the others and scored with the contest's exact loss.
-On the console single-player launches (the target's own kind) that scores
-a mean loss of about **0.20**, against about **0.32** for the house
-persistence baseline on the same launches; the model beat the baseline on
-every one of the eight.
+The weights, the kernel width, the spread factor and the smoothing were
+chosen by leave-one-out cross-validation over the comparable launches
+themselves — each comparable in turn forecast from the others and scored
+with the contest's exact loss. On the console single-player launches
+(the target's own kind) that scores a mean loss of about **0.185**,
+against about **0.32** for the house persistence baseline on the same
+launches; over all 37 comparable launches it scores about **0.39**
+against the baseline's **0.93**.
 
 The program is deterministic (two runs are byte-identical), runs in about
 0.2 s per case, and degrades to the house baseline's spread around the

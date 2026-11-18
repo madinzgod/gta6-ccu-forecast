@@ -10,17 +10,22 @@ whose unlock was a single global moment rather than a rolling midnight,
 one whose release day was contaminated by an earlier early-access peak,
 or a free-to-play / live-service launch each count for less, and a
 comparable whose hour-1 audience is far from the target's counts for less
-too (an exponential scale kernel). The forecast for an hour is the
-weighted empirical quantiles of the comparables' log ratios at that hour,
-mapped back through the case's own hour-1 print, with the spread around
-the median scaled by a single global factor.
+too (a Gaussian kernel on the log scale gap). The forecast for an hour
+is the weighted empirical quantiles of the comparables' log ratios at
+that hour, mapped back through the case's own hour-1 print, with the
+spread around the median scaled by a single global factor, and the
+log-quantile curve lightly smoothed across neighbouring hours (launch
+days evolve smoothly; the per-hour empirical quantiles, each drawn from
+a slightly different subset of comparables, do not).
 
-The weights and the spread factor were chosen by leave-one-out
-cross-validation over the comparable launches themselves: each comparable
-in turn is forecast from the others and scored with the contest's exact
-pinball loss on the log scale. On the console single-player launches (the
-target's own kind) that scores about 0.20 against the persistence
-baseline's about 0.32 on the same launches.
+The weights, the kernel width, the spread factor and the smoothing
+were chosen by leave-one-out cross-validation over the comparable
+launches themselves: each comparable in turn is forecast from the
+others and scored with the contest's exact pinball loss on the log
+scale. On the console single-player launches (the target's own kind)
+that scores about 0.185 against the persistence baseline's about 0.32
+on the same launches, and about 0.39 against about 0.93 over all
+comparable launches.
 """
 
 import json
@@ -33,8 +38,9 @@ Z = (-1.6448536269514722, -0.6744897501960817, 0.0,
      0.6744897501960817, 1.6448536269514722)
 
 # Chosen on a cross-validation plateau, not at its sharpest point.
-SPREAD_MULT = 0.95
-SCALE_TEMP = 1.6
+SPREAD_MULT = 0.78
+SCALE_SIGMA = 1.0
+SMOOTH = 0.25
 PC_MISMATCH = 0.5
 NOT_MIDNIGHT = 0.7
 GLOBAL_UNLOCK = 0.6
@@ -94,7 +100,8 @@ def ref_weight(feat, log_p, h1):
         w *= CONTAMINATED
     if feat["free_or_live"]:
         w *= FREE_OR_LIVE
-    w *= math.exp(-abs(math.log(h1) - log_p) / SCALE_TEMP)
+    gap = math.log(h1) - log_p
+    w *= math.exp(-(gap * gap) / (2.0 * SCALE_SIGMA * SCALE_SIGMA))
     return w
 
 
@@ -136,18 +143,36 @@ def forecast_case(case):
         if ratios:
             refs.append((ratios, ref_weight(feat, log_p, curve[1])))
 
-    rows = []
+    # Log-scale offsets from the hour-1 print, one row of five per hour.
+    offsets = {}
     for hour in range(2, 25):
         pairs = [(r[hour], w) for r, w in refs if hour in r]
         if pairs:
             med = weighted_quantile(pairs, 0.5)
-            qs = []
+            row = []
             for tau in LEVELS:
                 q = weighted_quantile(pairs, tau)
-                q = med + SPREAD_MULT * (q - med)
-                qs.append(math.exp(log_p + q))
+                row.append(med + SPREAD_MULT * (q - med))
+            offsets[hour] = row
         else:
-            qs = [p * math.exp(z * 0.15 * math.sqrt(hour - 1)) for z in Z]
+            offsets[hour] = [z * 0.15 * math.sqrt(hour - 1) for z in Z]
+
+    # Light smoothing across neighbouring hours, per quantile level,
+    # with the kernel renormalised at the day's edges.
+    smoothed = {}
+    for hour in range(2, 25):
+        acc = [0.0] * len(LEVELS)
+        wsum = 0.0
+        for dh, kw in ((-1, SMOOTH), (0, 1.0 - 2.0 * SMOOTH), (1, SMOOTH)):
+            if hour + dh in offsets:
+                wsum += kw
+                for k in range(len(LEVELS)):
+                    acc[k] += kw * offsets[hour + dh][k]
+        smoothed[hour] = [v / wsum for v in acc]
+
+    rows = []
+    for hour in range(2, 25):
+        qs = [math.exp(log_p + v) for v in smoothed[hour]]
         qs = [min(max(q, 1e-6), 1e9) for q in qs]
         for i in range(1, len(qs)):
             if qs[i] < qs[i - 1]:
